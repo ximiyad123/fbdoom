@@ -35,18 +35,23 @@ echo
 echo "Fixing Chocolate Doom startup..."
 echo
 
-MAIN_C="src/fbdoom/main.c"
+MAIN_C="src/chocolate-doom/src/i_main.c"
 
 if [ ! -f "$MAIN_C" ]; then
     echo "Error: $MAIN_C was not found."
     exit 1
 fi
 
-# Add M_SetExeDir() after the custom argv array has been
-# released, unless the fix is already present.
 if grep -q 'M_SetExeDir();' "$MAIN_C"; then
     echo "M_SetExeDir() fix already present."
 else
+    if ! grep -q 'free(doom_argv);' "$MAIN_C"; then
+        echo "Error: could not find free(doom_argv); in $MAIN_C"
+        echo
+        echo "Refusing to modify the file."
+        exit 1
+    fi
+
     sed -i '/^[[:space:]]*free(doom_argv);[[:space:]]*$/a\
 \
     M_SetExeDir();
