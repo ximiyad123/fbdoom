@@ -1,3 +1,6 @@
 [submodule "src/chocolate-doom"]
 	path = src/chocolate-doom
 	url = https://github.com/chocolate-doom/chocolate-doom.git
+[submodule "src/fbprinter"]
+	path = src/fbprinter
+	url = https://github.com/ximiyad123/fbprinter.git
