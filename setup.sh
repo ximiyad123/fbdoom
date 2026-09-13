@@ -32,6 +32,30 @@ echo
 echo "Submodules ready."
 echo
 
+echo "Fixing Chocolate Doom startup..."
+echo
+
+MAIN_C="src/fbdoom/main.c"
+
+if [ ! -f "$MAIN_C" ]; then
+    echo "Error: $MAIN_C was not found."
+    exit 1
+fi
+
+# Add M_SetExeDir() after the custom argv array has been
+# released, unless the fix is already present.
+if grep -q 'M_SetExeDir();' "$MAIN_C"; then
+    echo "M_SetExeDir() fix already present."
+else
+    sed -i '/^[[:space:]]*free(doom_argv);[[:space:]]*$/a\
+\
+    M_SetExeDir();
+' "$MAIN_C"
+
+    echo "M_SetExeDir() fix applied."
+fi
+
+echo
 echo "Building existing Dockerfile..."
 echo
 
