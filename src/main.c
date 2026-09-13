@@ -4,12 +4,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "d_main.h"
+#include "m_misc.h"
+#include "m_argv.h"
+
 #include "i_video_fbdoom.h"
 
-#define DEFAULT_SCALE 2
 
-#define GAME_WIDTH  320
-#define GAME_HEIGHT 200
+/*
+ * Chocolate Doom 3.1.1 defines D_DoomMain() in d_main.c
+ * but does not declare it in d_main.h.
+ */
+
+void D_DoomMain(void);
+
+
+#define DEFAULT_SCALE 2
 
 
 typedef struct FBDoomOptions {
@@ -30,6 +40,21 @@ typedef struct FBDoomOptions {
     const char *wad;
 
 } FBDoomOptions;
+
+
+/*
+ * These are consumed by the FBDOOM platform backends.
+ */
+
+uintptr_t fbdoom_address;
+unsigned int fbdoom_display_width;
+unsigned int fbdoom_display_height;
+unsigned int fbdoom_scale;
+int fbdoom_keep_leftover;
+
+const char *fbdoom_vol_up_event;
+const char *fbdoom_power_event;
+const char *fbdoom_vol_down_event;
 
 
 static void print_usage(const char *program)
@@ -100,7 +125,6 @@ static int parse_display(
     }
 
     *address = (uintptr_t)parsed_address;
-
     *width = (unsigned int)parsed_width;
     *height = (unsigned int)parsed_height;
 
@@ -116,11 +140,7 @@ static int parse_scale(
     unsigned long parsed;
     char *end;
 
-    if (strncmp(value, "--scale=", 8) != 0)
-        return -1;
-
     errno = 0;
-
     end = NULL;
 
     parsed = strtoul(
@@ -155,22 +175,13 @@ static int parse_options(
 
         const char *arg = argv[i];
 
-        if (strcmp(
-                arg,
-                "--keep-leftover"
-            ) == 0) {
+        if (strcmp(arg, "--keep-leftover") == 0) {
 
             options->keep_leftover = 1;
-
             continue;
         }
 
-
-        if (strncmp(
-                arg,
-                "--scale=",
-                8
-            ) == 0) {
+        if (strncmp(arg, "--scale=", 8) == 0) {
 
             if (parse_scale(
                     arg,
@@ -189,58 +200,29 @@ static int parse_options(
             continue;
         }
 
+        if (strncmp(arg, "--vol-up-event=", 15) == 0) {
 
-        if (strncmp(
-                arg,
-                "--vol-up-event=",
-                15
-            ) == 0) {
-
-            options->vol_up_event =
-                arg + 15;
-
+            options->vol_up_event = arg + 15;
             continue;
         }
 
+        if (strncmp(arg, "--power-event=", 14) == 0) {
 
-        if (strncmp(
-                arg,
-                "--power-event=",
-                14
-            ) == 0) {
-
-            options->power_event =
-                arg + 14;
-
+            options->power_event = arg + 14;
             continue;
         }
 
+        if (strncmp(arg, "--vol-down-event=", 18) == 0) {
 
-        if (strncmp(
-                arg,
-                "--vol-down-event=",
-                18
-            ) == 0) {
-
-            options->vol_down_event =
-                arg + 18;
-
+            options->vol_down_event = arg + 18;
             continue;
         }
 
+        if (strncmp(arg, "--wad=", 6) == 0) {
 
-        if (strncmp(
-                arg,
-                "--wad=",
-                6
-            ) == 0) {
-
-            options->wad =
-                arg + 6;
-
+            options->wad = arg + 6;
             continue;
         }
-
 
         fprintf(
             stderr,
@@ -255,84 +237,6 @@ static int parse_options(
 }
 
 
-static void make_test_frame(
-    uint8_t *framebuffer,
-    uint32_t *palette
-)
-{
-    unsigned int x;
-    unsigned int y;
-
-    /*
-     * Temporary grayscale palette.
-     *
-     * Chocolate Doom will eventually provide the
-     * real palette through I_SetPalette().
-     */
-
-    for (unsigned int i = 0; i < 256; i++) {
-
-        uint32_t c = i;
-
-        palette[i] =
-            0xff000000u |
-            (c << 16) |
-            (c << 8) |
-            c;
-    }
-
-
-    /*
-     * Gradient.
-     */
-
-    for (y = 0; y < GAME_HEIGHT; y++) {
-
-        for (x = 0; x < GAME_WIDTH; x++) {
-
-            uint8_t value;
-
-            value =
-                (uint8_t)(
-                    (x * 255) /
-                    (GAME_WIDTH - 1)
-                );
-
-            framebuffer[
-                y * GAME_WIDTH + x
-            ] = value;
-        }
-    }
-
-
-    /*
-     * White vertical line.
-     */
-
-    for (y = 0; y < GAME_HEIGHT; y++) {
-
-        framebuffer[
-            y * GAME_WIDTH +
-            GAME_WIDTH / 2
-        ] = 255;
-    }
-
-
-    /*
-     * White horizontal line.
-     */
-
-    for (x = 0; x < GAME_WIDTH; x++) {
-
-        framebuffer[
-            (GAME_HEIGHT / 2) *
-            GAME_WIDTH +
-            x
-        ] = 255;
-    }
-}
-
-
 int main(
     int argc,
     char **argv
@@ -340,15 +244,15 @@ int main(
 {
     FBDoomOptions options;
 
-    uint8_t *framebuffer;
-
-    uint32_t palette[256];
+    char **doom_argv;
+    int doom_argc;
+    int i;
+    int extra_args = 0;
 
 
     if (argc < 2) {
 
         print_usage(argv[0]);
-
         return 1;
     }
 
@@ -358,7 +262,6 @@ int main(
         0,
         sizeof(options)
     );
-
 
     options.scale = DEFAULT_SCALE;
 
@@ -394,138 +297,167 @@ int main(
     }
 
 
-    printf(
-        "FBDOOM video test\n"
-        "-----------------\n"
+    /*
+     * Export FBDOOM platform configuration.
+     */
+
+    fbdoom_address = options.address;
+    fbdoom_display_width = options.display_width;
+    fbdoom_display_height = options.display_height;
+    fbdoom_scale = options.scale;
+    fbdoom_keep_leftover = options.keep_leftover;
+
+    fbdoom_vol_up_event = options.vol_up_event;
+    fbdoom_power_event = options.power_event;
+    fbdoom_vol_down_event = options.vol_down_event;
+
+
+    /*
+     * Build the argument list passed to Chocolate Doom.
+     */
+
+    if (options.wad != NULL)
+        extra_args = 2;
+
+
+    doom_argv = malloc(
+        (size_t)(argc + extra_args + 1) *
+        sizeof(*doom_argv)
     );
 
-
-    printf(
-        "Display address : 0x%lx\n",
-        (unsigned long)options.address
-    );
-
-
-    printf(
-        "Display size    : %ux%u\n",
-        options.display_width,
-        options.display_height
-    );
-
-
-    printf(
-        "Game size       : %ux%u\n",
-        GAME_WIDTH,
-        GAME_HEIGHT
-    );
-
-
-    printf(
-        "Scale           : %u\n",
-        options.scale
-    );
-
-
-    printf(
-        "Keep leftover   : %s\n",
-        options.keep_leftover ?
-            "yes" :
-            "no"
-    );
-
-
-    printf(
-        "Volume Up       : %s\n",
-        options.vol_up_event ?
-            options.vol_up_event :
-            "(not set)"
-    );
-
-
-    printf(
-        "Power           : %s\n",
-        options.power_event ?
-            options.power_event :
-            "(not set)"
-    );
-
-
-    printf(
-        "Volume Down     : %s\n",
-        options.vol_down_event ?
-            options.vol_down_event :
-            "(not set)"
-    );
-
-
-    printf(
-        "WAD             : %s\n",
-        options.wad ?
-            options.wad :
-            "(not set)"
-    );
-
-
-    if (FBDoom_VideoInit(
-            options.address,
-            options.display_width,
-            options.display_height,
-            options.scale
-        ) != 0) {
+    if (doom_argv == NULL) {
 
         fprintf(
             stderr,
-            "Failed to initialize FBDOOM video backend.\n"
+            "Failed to allocate argument list.\n"
         );
 
         return 1;
     }
 
 
-    FBDoom_VideoSetKeepLeftover(
-        options.keep_leftover
+    doom_argc = 0;
+
+    doom_argv[doom_argc++] = argv[0];
+
+
+    for (i = 2; i < argc; i++) {
+
+        const char *arg = argv[i];
+
+
+        /*
+         * Remove FBDOOM-specific options.
+         */
+
+        if (strncmp(arg, "--scale=", 8) == 0)
+            continue;
+
+        if (strcmp(arg, "--keep-leftover") == 0)
+            continue;
+
+        if (strncmp(arg, "--vol-up-event=", 15) == 0)
+            continue;
+
+        if (strncmp(arg, "--power-event=", 14) == 0)
+            continue;
+
+        if (strncmp(arg, "--vol-down-event=", 18) == 0)
+            continue;
+
+        if (strncmp(arg, "--wad=", 6) == 0)
+            continue;
+
+
+        doom_argv[doom_argc++] = argv[i];
+    }
+
+
+    /*
+     * Convert --wad=PATH into normal Chocolate Doom arguments.
+     */
+
+    if (options.wad != NULL) {
+
+        doom_argv[doom_argc++] = "-iwad";
+        doom_argv[doom_argc++] = (char *)options.wad;
+    }
+
+
+    doom_argv[doom_argc] = NULL;
+
+
+    /*
+     * Chocolate Doom's m_argv.c owns myargc/myargv.
+     */
+
+    myargc = doom_argc;
+
+    myargv = malloc(
+        (size_t)doom_argc *
+        sizeof(*myargv)
     );
 
-
-    framebuffer = malloc(
-        (size_t)GAME_WIDTH *
-        (size_t)GAME_HEIGHT
-    );
-
-
-    if (framebuffer == NULL) {
+    if (myargv == NULL) {
 
         fprintf(
             stderr,
-            "Failed to allocate framebuffer.\n"
+            "Failed to allocate Chocolate Doom arguments.\n"
         );
 
-        FBDoom_VideoShutdown();
+        free(doom_argv);
+
 
         return 1;
     }
 
 
-    make_test_frame(
-        framebuffer,
-        palette
-    );
+    for (i = 0; i < doom_argc; i++)
+        myargv[i] = M_StringDuplicate(doom_argv[i]);
 
 
-    FBDoom_VideoPresent(
-        framebuffer,
-        palette
-    );
+    free(doom_argv);
 
+
+
+    M_SetExeDir();
 
     printf(
-        "Frame presented.\n"
+        "FBDOOM\n"
+        "------\n"
+        "Display : 0x%lx %ux%u\n"
+        "Scale   : %u\n"
+        "WAD     : %s\n"
+        "\n",
+        (unsigned long)fbdoom_address,
+        fbdoom_display_width,
+        fbdoom_display_height,
+        fbdoom_scale,
+        options.wad ? options.wad : "(auto)"
     );
 
 
-    free(framebuffer);
+    /*
+     * Start the real Chocolate Doom engine.
+     */
 
-    FBDoom_VideoShutdown();
+    D_DoomMain();
+
+
+    /*
+     * Normally D_DoomMain() never returns, but clean up
+     * the manually-created argument vector if it does.
+     */
+
+    if (myargv != NULL) {
+
+        for (i = 0; i < myargc; i++)
+            free(myargv[i]);
+
+        free(myargv);
+        myargv = NULL;
+    }
+
 
     return 0;
 }

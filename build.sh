@@ -75,7 +75,13 @@ case "${1:-dynamic}" in
 
         echo
         echo "Cleaning Chocolate Doom..."
-        make -C src/chocolate-doom clean
+
+        rm -f src/chocolate-doom/Makefile
+        rm -f src/chocolate-doom/config.status
+        rm -f src/chocolate-doom/config.log
+        rm -f src/chocolate-doom/config.h
+        rm -f src/chocolate-doom/stamp-h1
+        rm -rf src/chocolate-doom/autom4te.cache
 
         echo
         echo "Clean complete."
@@ -105,11 +111,57 @@ echo
 "$CONTAINER_RUNTIME" run --rm \
     -v "$PWD:/src:Z" \
     -w /src \
+    -e ARCH="$ARCH" \
+    -e TARGET="$TARGET" \
     "$IMAGE" \
-    make ARCH="$ARCH" "$TARGET"
+    sh -c '
+        set -eu
+
+        if [ ! -f src/chocolate-doom/Makefile ]; then
+            echo "========================================"
+            echo " Configuring Chocolate Doom"
+            echo "========================================"
+
+            cd src/chocolate-doom
+
+            autoreconf -fi
+
+            case "$ARCH" in
+                arm64)
+                    HOST=aarch64-linux-gnu
+                    ;;
+                arm)
+                    HOST=arm-linux-gnueabihf
+                    ;;
+            esac
+
+            ./configure \
+                --host="$HOST"
+
+            cd /src
+        else
+            echo "Chocolate Doom already configured."
+        fi
+
+        make ARCH="$ARCH" MODE="$TARGET" "$TARGET"
+    '
 
 echo
 echo "========================================"
 echo " Build complete"
 echo "========================================"
+echo
+
+echo "Output:"
+
+case "$TARGET" in
+    dynamic)
+        echo "  build/arch/$ARCH/dynamic/fbdoom"
+        echo "  build/arch/$ARCH/dynamic/libfbprinter.so"
+        ;;
+    static)
+        echo "  build/arch/$ARCH/static/fbdoom"
+        ;;
+esac
+
 echo
