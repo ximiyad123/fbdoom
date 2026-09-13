@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "fbprinter.h"
 
@@ -21,6 +22,9 @@ static unsigned int output_width;
 static unsigned int output_height;
 
 
+/*
+ * Initialize the FBDOOM video backend.
+ */
 int FBDoom_VideoInit(
     uintptr_t address,
     unsigned int width,
@@ -66,15 +70,30 @@ int FBDoom_VideoInit(
 }
 
 
+/*
+ * Match the behavior of the fbprinter CLI:
+ *
+ *   default:
+ *       clear the framebuffer before drawing
+ *
+ *   --keep-leftover:
+ *       preserve the existing framebuffer contents
+ */
 void FBDoom_VideoSetKeepLeftover(int enabled)
 {
     fbprinter_set_keep_leftover(
         &fbprinter,
         enabled
     );
+
+    if (!enabled)
+        fbprinter_clear(&fbprinter);
 }
 
 
+/*
+ * Shut down the video backend.
+ */
 void FBDoom_VideoShutdown(void)
 {
     fbprinter_close(&fbprinter);
@@ -84,6 +103,15 @@ void FBDoom_VideoShutdown(void)
 }
 
 
+/*
+ * Render a 320×200 indexed Doom frame.
+ *
+ * source:
+ *     320×200 palette indices
+ *
+ * palette:
+ *     256 entries of 0xAARRGGBB
+ */
 void FBDoom_VideoPresent(
     const uint8_t *source,
     const uint32_t *palette
@@ -97,13 +125,14 @@ void FBDoom_VideoPresent(
         palette == NULL)
         return;
 
+    /*
+     * Convert the Doom indexed framebuffer into an
+     * ARGB framebuffer while applying the requested scale.
+     */
     for (y = 0; y < FBDOOM_GAME_HEIGHT; y++) {
-
         for (x = 0; x < FBDOOM_GAME_WIDTH; x++) {
-
             uint8_t index;
             uint32_t color;
-
             unsigned int sy;
             unsigned int sx;
 
@@ -114,7 +143,6 @@ void FBDoom_VideoPresent(
             color = palette[index];
 
             for (sy = 0; sy < scale; sy++) {
-
                 uint32_t *dst =
                     output_buffer +
                     (size_t)(y * scale + sy) *
@@ -127,6 +155,9 @@ void FBDoom_VideoPresent(
         }
     }
 
+    /*
+     * Center the Doom image on the physical display.
+     */
     fbprinter_draw_buffer_positioned(
         &fbprinter,
         output_buffer,

@@ -5,12 +5,47 @@ CPPFLAGS += \
 	-Isrc/fbdoom \
 	-Isrc/fbprinter/include
 
-TARGET := build/bin/fbdoom
+# ------------------------------------------------------------
+# Architecture / compiler
+# ------------------------------------------------------------
+
+ifeq ($(ARCH),arm64)
+	override CC := aarch64-linux-gnu-gcc
+	ARCH_DIR := arm64
+else ifeq ($(ARCH),arm)
+	override CC := arm-linux-gnueabihf-gcc
+	ARCH_DIR := arm
+else
+	$(error Unsupported ARCH='$(ARCH)'. Use ARCH=arm64 or ARCH=arm)
+endif
+
+
+# ------------------------------------------------------------
+# Build directories
+# ------------------------------------------------------------
+
+BUILD_DIR := build/arch/$(ARCH_DIR)
+
+DYNAMIC_DIR := $(BUILD_DIR)/dynamic
+STATIC_DIR  := $(BUILD_DIR)/static
+
+DYNAMIC_TARGET := $(DYNAMIC_DIR)/fbdoom
+STATIC_TARGET  := $(STATIC_DIR)/fbdoom
+
+
+# ------------------------------------------------------------
+# Sources
+# ------------------------------------------------------------
 
 SOURCES := \
 	src/main.c \
 	src/fbdoom/i_video_fbdoom.c \
 	src/fbdoom/i_input_fbdoom.c
+
+
+# ------------------------------------------------------------
+# fbprinter
+# ------------------------------------------------------------
 
 FBPRINTER_DIR := src/fbprinter
 
@@ -28,18 +63,8 @@ FBPRINTER_LIB_OBJECTS := \
 	$(FBPRINTER_OBJ_DIR)/gif.o \
 	$(FBPRINTER_OBJ_DIR)/ini_parser.o
 
-
-# ------------------------------------------------------------
-# Architecture / compiler
-# ------------------------------------------------------------
-
-ifeq ($(ARCH),arm64)
-	override CC := aarch64-linux-gnu-gcc
-else ifeq ($(ARCH),arm)
-	override CC := arm-linux-gnueabihf-gcc
-else
-	$(error Unsupported ARCH='$(ARCH)'. Use ARCH=arm64 or ARCH=arm)
-endif
+DYNAMIC_LIB := \
+	$(DYNAMIC_DIR)/libfbprinter.so
 
 
 # ------------------------------------------------------------
@@ -93,14 +118,14 @@ else
 		ARCH=$(ARCH) \
 		dynamic
 
-	@mkdir -p build/lib
+	@mkdir -p $(DYNAMIC_DIR)
 
 	cp $(FBPRINTER_DIR)/build/dynamic/libfbprinter.so \
-		build/lib/libfbprinter.so
+		$(DYNAMIC_LIB)
 
 	@echo
 	@echo "libfbprinter:"
-	@echo "  build/lib/libfbprinter.so"
+	@echo "  $(DYNAMIC_LIB)"
 	@echo
 
 endif
@@ -118,11 +143,12 @@ fbdoom: fbprinter
 	@echo " Architecture : $(ARCH)"
 	@echo " Compiler     : $(CC)"
 	@echo " Mode         : $(MODE)"
+	@echo " Output       : $(BUILD_DIR)"
 	@echo "========================================"
 
-	@mkdir -p build/bin
-
 ifeq ($(MODE),static)
+
+	@mkdir -p $(STATIC_DIR)
 
 	$(CC) \
 		-static \
@@ -136,25 +162,32 @@ ifeq ($(MODE),static)
 		-lgif \
 		-lz \
 		-lm \
-		-o $(TARGET)
+		-o $(STATIC_TARGET)
+
+	@echo
+	@echo "FBDOOM:"
+	@echo "  $(STATIC_TARGET)"
+	@echo
 
 else
+
+	@mkdir -p $(DYNAMIC_DIR)
 
 	$(CC) \
 		$(CFLAGS) \
 		$(CPPFLAGS) \
 		$(SOURCES) \
-		-Lbuild/lib \
-		-Wl,-rpath,'$$ORIGIN/../lib' \
+		-L$(DYNAMIC_DIR) \
+		-Wl,-rpath,'$$ORIGIN' \
 		-lfbprinter \
-		-o $(TARGET)
-
-endif
+		-o $(DYNAMIC_TARGET)
 
 	@echo
 	@echo "FBDOOM:"
-	@echo "  $(TARGET)"
+	@echo "  $(DYNAMIC_TARGET)"
 	@echo
+
+endif
 
 
 # ------------------------------------------------------------
